@@ -41,6 +41,9 @@ export class GameScene extends Phaser.Scene {
   // Keep track of player state (IDLE, JUMPING) to prevent multiple jumps
   private playerState: "IDLE" | "JUMPING" = "IDLE";
 
+  // --- NEW: Idle Bounce Tween Property ---
+  private idleBounceTween?: Phaser.Tweens.Tween; // Optional, as
+
   constructor() {
     super({ key: "GameScene" });
   }
@@ -106,6 +109,53 @@ export class GameScene extends Phaser.Scene {
     graphicsPlayer.destroy();
   }
 
+  private startIdleBounce(): void {
+    // Stop any existing bounce tween first
+    this.stopIdleBounce();
+
+    if (!this.playerSprite) return; // Safety check
+
+    // Define the bounce height (adjust as needed)
+    const bounceHeight = 8; // Pixels to move up
+    const bounceDuration = 400; // Milliseconds for one up/down cycle
+
+    console.log("Starting idle bounce tween");
+    this.idleBounceTween = this.tweens.add({
+      targets: this.playerSprite,
+      y: this.playerSprite.y - bounceHeight, // Target Y position (higher on screen)
+      duration: bounceDuration,
+      ease: "Sine.easeInOut", // Smooth easing
+      yoyo: true, // Automatically tweens back to the original 'y'
+      repeat: -1 // Loop indefinitely (-1 means infinite repeats)
+    });
+  }
+
+  // --- Helper function to stop the idle bounce ---
+  private stopIdleBounce(): void {
+    if (this.idleBounceTween?.isPlaying()) {
+      // Check if tween exists and is active
+      console.log("Stopping idle bounce tween");
+      this.idleBounceTween.stop();
+
+      // --- *** Force Reset player Y to its current base position *** ---
+      if (this.playerSprite) {
+        // Safety check for playerSprite
+        // Calculate the base Y for the *current* grid position before the jump starts
+        const originX = this.cameras.main.width / 2; // Need these for calculation
+        const originY = this.cameras.main.height / 2 - 50; // Keep consistent
+        const basePlayerScreenY =
+          originY + (this.playerGridX + this.playerGridY) * TILE_HEIGHT_HALF;
+
+        console.log(
+          `Resetting player Y from ${this.playerSprite.y} to base ${basePlayerScreenY}`
+        );
+        this.playerSprite.setY(basePlayerScreenY); // Force reset to calculated base
+      }
+      // --- *** End of modification *** ---
+    }
+    this.idleBounceTween = undefined; // Clear the reference
+  }
+
   create(): void {
     console.log("GameScene: create - Initializing State");
 
@@ -168,6 +218,9 @@ export class GameScene extends Phaser.Scene {
 
     this.cursors = this.input.keyboard.createCursorKeys();
     console.log("Cursor keys initialized.");
+
+    // --- Start initial idle bounce ---
+    this.startIdleBounce();
   }
 
   update(time: number, delta: number): void {
@@ -259,6 +312,7 @@ export class GameScene extends Phaser.Scene {
           this.playerGridX = targetGridX;
           this.playerGridY = targetGridY;
 
+          // Change Block State and Appearance...
           const blockState =
             this.blockStates[this.playerGridY]?.[this.playerGridX];
           if (blockState) {
@@ -273,26 +327,27 @@ export class GameScene extends Phaser.Scene {
             }
           }
 
+          // Update Player Depth based on new position...
           const newPlayerScreenY =
             originY + (this.playerGridX + this.playerGridY) * TILE_HEIGHT_HALF;
           this.playerSprite?.setDepth(newPlayerScreenY + 1);
 
-          // --- *** Check for Win Condition *** ---
+          // --- Check for Win Condition ---
           if (this.checkWinCondition()) {
             // --- Level Complete! ---
             console.log("*************************");
             console.log("**** MVP LEVEL CLEAR! ****");
             console.log("*************************");
-            // Optionally disable further input or transition scene
-            this.playerState = "JUMPING"; // Simple way to disable input for MVP
-            // In a real game, you might transition to a "Level Complete" scene
-            // this.scene.start('LevelCompleteScene');
+            this.playerState = "JUMPING"; // Disable input for MVP
+            // Bounce should already be stopped, no need to restart if won
           } else {
             // Only allow next jump if the level is NOT complete
             this.playerState = "IDLE";
             console.log("Player state set to IDLE.");
+            // --- *** Restart Idle Bounce *** ---
+            this.startIdleBounce(); // Add this line back!
           }
-        } // End of onComplete
+        }
       }); // End of tween config
     } else {
       console.log(`Invalid jump target: (${targetGridX}, ${targetGridY})`);
