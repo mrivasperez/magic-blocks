@@ -13,6 +13,7 @@ interface BlockState {
 // Define the visual size of our isometric tiles
 const TILE_WIDTH_HALF = 32; // Half the width of the tile image
 const TILE_HEIGHT_HALF = 16; // Half the height of the tile image
+const PLAYER_VERTICAL_OFFSET = -TILE_HEIGHT_HALF * 0.8; // Negative value shifts UP. Adjust multiplier (0.8) as needed.
 
 // Define the grid layout (1 = block, 0 = empty)
 const levelLayout: number[][] = [
@@ -133,25 +134,9 @@ export class GameScene extends Phaser.Scene {
   // --- Helper function to stop the idle bounce ---
   private stopIdleBounce(): void {
     if (this.idleBounceTween?.isPlaying()) {
-      // Check if tween exists and is active
-      console.log("Stopping idle bounce tween");
+      console.log("Stopping idle bounce tween (without forcing Y reset)");
       this.idleBounceTween.stop();
-
-      // --- *** Force Reset player Y to its current base position *** ---
-      if (this.playerSprite) {
-        // Safety check for playerSprite
-        // Calculate the base Y for the *current* grid position before the jump starts
-        const originX = this.cameras.main.width / 2; // Need these for calculation
-        const originY = this.cameras.main.height / 2 - 50; // Keep consistent
-        const basePlayerScreenY =
-          originY + (this.playerGridX + this.playerGridY) * TILE_HEIGHT_HALF;
-
-        console.log(
-          `Resetting player Y from ${this.playerSprite.y} to base ${basePlayerScreenY}`
-        );
-        this.playerSprite.setY(basePlayerScreenY); // Force reset to calculated base
-      }
-      // --- *** End of modification *** ---
+      // REMOVED the explicit setY call again. Let the jump tween handle final position.
     }
     this.idleBounceTween = undefined; // Clear the reference
   }
@@ -162,57 +147,68 @@ export class GameScene extends Phaser.Scene {
     // --- Initialize Player Logical Position ---
     this.playerGridX = PLAYER_START_GRID_X;
     this.playerGridY = PLAYER_START_GRID_Y;
-    this.playerState = "IDLE"; // Ensure player starts idle
+    this.playerState = "IDLE";
 
     const originX = this.cameras.main.width / 2;
     const originY = this.cameras.main.height / 2 - 50;
 
     this.gridSprites = [];
-    // --- Initialize Block States Array ---
-    this.blockStates = []; // Clear/initialize block states
+    this.blockStates = [];
 
     const gridHeight = levelLayout.length;
 
     for (let gridY = 0; gridY < gridHeight; gridY++) {
       this.gridSprites[gridY] = [];
-      // --- Initialize Row for Block States ---
-      this.blockStates[gridY] = []; // Initialize state row
-
+      this.blockStates[gridY] = [];
       const gridWidth = levelLayout[gridY]?.length ?? 0;
 
       for (let gridX = 0; gridX < gridWidth; gridX++) {
         if (levelLayout[gridY][gridX] === 1) {
           const screenX = originX + (gridX - gridY) * TILE_WIDTH_HALF;
-          const screenY = originY + (gridX + gridY) * TILE_HEIGHT_HALF;
+          // --- Calculate BASE screen Y for the block ---
+          const blockBaseScreenY = originY + (gridX + gridY) * TILE_HEIGHT_HALF;
 
-          const blockSprite = this.add.sprite(screenX, screenY, "block_yellow");
+          const blockSprite = this.add.sprite(
+            screenX,
+            blockBaseScreenY,
+            "block_yellow"
+          ); // Position block at base Y
           blockSprite.setOrigin(0.5, 0.5);
-          blockSprite.setDepth(screenY);
+          // --- Set block depth based on its BASE Y ---
+          blockSprite.setDepth(blockBaseScreenY);
 
           this.gridSprites[gridY][gridX] = blockSprite;
-
-          // --- Create and Store Logical Block State ---
           this.blockStates[gridY][gridX] = { isChanged: false };
         } else {
           this.gridSprites[gridY][gridX] = null;
-          // --- Store Null for Empty Grid Cells in State ---
           this.blockStates[gridY][gridX] = null;
         }
       }
     }
 
-    // --- Player Rendering (using initialized state) ---
+    // --- Player Rendering ---
     const playerScreenX =
       originX + (this.playerGridX - this.playerGridY) * TILE_WIDTH_HALF;
-    const playerScreenY =
+    // Calculate base Y (for depth) AND offset Y (for visual position)
+    const basePlayerScreenY =
       originY + (this.playerGridX + this.playerGridY) * TILE_HEIGHT_HALF;
+    const playerVisualScreenY = basePlayerScreenY + PLAYER_VERTICAL_OFFSET; // Visual Y
 
-    this.playerSprite = this.add.sprite(playerScreenX, playerScreenY, "player");
+    this.playerSprite = this.add.sprite(
+      playerScreenX,
+      playerVisualScreenY,
+      "player"
+    ); // Position using VISUAL Y
     this.playerSprite.setOrigin(0.5, 0.5);
-    this.playerSprite.setDepth(playerScreenY + 1);
+    // --- Adjust Depth Calculation ---
+    // Base depth on the *BASE* Y position of the tile, plus a bias
+    this.playerSprite.setDepth(basePlayerScreenY + 1); // Use BASE Y for depth calculation
 
     console.log(
       `Player starting at grid (${this.playerGridX}, ${this.playerGridY})`
+    );
+    console.log(
+      `Player base Y: ${basePlayerScreenY}, Visual Y: ${playerVisualScreenY}, Depth: ${this.playerSprite.depth}`
     );
     console.log("Block states initialized.");
 
@@ -295,14 +291,16 @@ export class GameScene extends Phaser.Scene {
       const originY = this.cameras.main.height / 2 - 50; // Keep consistent with create
       const targetScreenX =
         originX + (targetGridX - targetGridY) * TILE_WIDTH_HALF;
-      const targetScreenY =
+      // Calculate base target Y and apply offset
+      const baseTargetScreenY =
         originY + (targetGridX + targetGridY) * TILE_HEIGHT_HALF;
+      const targetScreenY = baseTargetScreenY + PLAYER_VERTICAL_OFFSET; // Apply offset
 
       // --- Animate the Jump using Phaser Tweens ---
       this.tweens.add({
         targets: this.playerSprite,
         x: targetScreenX,
-        y: targetScreenY,
+        y: targetScreenY, // Tween to the *offset* position
         duration: 250,
         ease: "Linear",
         onComplete: () => {
@@ -328,9 +326,10 @@ export class GameScene extends Phaser.Scene {
           }
 
           // Update Player Depth based on new position...
-          const newPlayerScreenY =
+          // IMPORTANT: Calculate the BASE Y for depth calculation
+          const baseNewPlayerScreenY =
             originY + (this.playerGridX + this.playerGridY) * TILE_HEIGHT_HALF;
-          this.playerSprite?.setDepth(newPlayerScreenY + 1);
+          this.playerSprite?.setDepth(baseNewPlayerScreenY + 1); // Use BASE Y for depth
 
           // --- Check for Win Condition ---
           if (this.checkWinCondition()) {
@@ -339,13 +338,36 @@ export class GameScene extends Phaser.Scene {
             console.log("**** MVP LEVEL CLEAR! ****");
             console.log("*************************");
             this.playerState = "JUMPING"; // Disable input for MVP
-            // Bounce should already be stopped, no need to restart if won
+
+            // --- *** Force Stop Bounce & Set Final Position *** ---
+            console.log(
+              "Win condition met: Forcing stop bounce and final position."
+            );
+            this.stopIdleBounce(); // Explicitly stop bounce again just in case
+
+            if (this.playerSprite) {
+              // Recalculate the final target position including offset
+              const finalTargetX =
+                originX +
+                (this.playerGridX - this.playerGridY) * TILE_WIDTH_HALF;
+              const finalBaseTargetY =
+                originY +
+                (this.playerGridX + this.playerGridY) * TILE_HEIGHT_HALF;
+              const finalVisualTargetY =
+                finalBaseTargetY + PLAYER_VERTICAL_OFFSET;
+
+              console.log(
+                `Setting final position to: (${finalTargetX}, ${finalVisualTargetY})`
+              );
+              this.playerSprite.setPosition(finalTargetX, finalVisualTargetY); // Set final position explicitly
+              this.playerSprite.setDepth(baseNewPlayerScreenY + 1); // Re-assert depth based on BASE Y
+            }
           } else {
             // Only allow next jump if the level is NOT complete
             this.playerState = "IDLE";
             console.log("Player state set to IDLE.");
             // --- *** Restart Idle Bounce *** ---
-            this.startIdleBounce(); // Add this line back!
+            this.startIdleBounce();
           }
         }
       }); // End of tween config
