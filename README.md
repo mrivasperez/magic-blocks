@@ -1,4 +1,4 @@
-# Otto's Magic Blocks Clone (Phaser 3 + TypeScript)
+# Magic Blocks
 
 A recreation of the classic WildTangent game "Otto's Magic Blocks" (circa 2004), built using modern web technologies. This project aims to replicate the core gameplay mechanics, featuring an isometric perspective where the player jumps between blocks to change their color.
 
