@@ -180,32 +180,44 @@ export class GameScene extends Phaser.Scene {
     let targetGridY: number = this.playerGridY;
     let directionPressed: boolean = false;
 
-// --- Check for Input (using JustDown to trigger once per press) ---
-if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) {
-  // Visual Down-Left -> Decrease gridX
-  targetGridX = this.playerGridX - 1;
-  targetGridY = this.playerGridY; // Y does not change
-  directionPressed = true;
-  console.log("Input: Left Arrow -> Try move to:", targetGridX, targetGridY);
-} else if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) {
-  // Visual Up-Right -> Increase gridX
-  targetGridX = this.playerGridX + 1;
-  targetGridY = this.playerGridY; // Y does not change
-  directionPressed = true;
-   console.log("Input: Right Arrow -> Try move to:", targetGridX, targetGridY);
-} else if (Phaser.Input.Keyboard.JustDown(this.cursors.up)) {
-  // Visual Up-Left -> Decrease gridY
-  targetGridX = this.playerGridX; // X does not change
-  targetGridY = this.playerGridY - 1;
-  directionPressed = true;
-   console.log("Input: Up Arrow -> Try move to:", targetGridX, targetGridY);
-} else if (Phaser.Input.Keyboard.JustDown(this.cursors.down)) {
-  // Visual Down-Right -> Increase gridY
-  targetGridX = this.playerGridX; // X does not change
-  targetGridY = this.playerGridY + 1;
-  directionPressed = true;
-   console.log("Input: Down Arrow -> Try move to:", targetGridX, targetGridY);
-}
+    // --- Check for Input (using JustDown to trigger once per press) ---
+    if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) {
+      // Visual Down-Left -> Decrease gridX
+      targetGridX = this.playerGridX - 1;
+      targetGridY = this.playerGridY; // Y does not change
+      directionPressed = true;
+      console.log(
+        "Input: Left Arrow -> Try move to:",
+        targetGridX,
+        targetGridY
+      );
+    } else if (Phaser.Input.Keyboard.JustDown(this.cursors.right)) {
+      // Visual Up-Right -> Increase gridX
+      targetGridX = this.playerGridX + 1;
+      targetGridY = this.playerGridY; // Y does not change
+      directionPressed = true;
+      console.log(
+        "Input: Right Arrow -> Try move to:",
+        targetGridX,
+        targetGridY
+      );
+    } else if (Phaser.Input.Keyboard.JustDown(this.cursors.up)) {
+      // Visual Up-Left -> Decrease gridY
+      targetGridX = this.playerGridX; // X does not change
+      targetGridY = this.playerGridY - 1;
+      directionPressed = true;
+      console.log("Input: Up Arrow -> Try move to:", targetGridX, targetGridY);
+    } else if (Phaser.Input.Keyboard.JustDown(this.cursors.down)) {
+      // Visual Down-Right -> Increase gridY
+      targetGridX = this.playerGridX; // X does not change
+      targetGridY = this.playerGridY + 1;
+      directionPressed = true;
+      console.log(
+        "Input: Down Arrow -> Try move to:",
+        targetGridX,
+        targetGridY
+      );
+    }
 
     // If no direction was pressed, exit update
     if (!directionPressed) {
@@ -237,25 +249,20 @@ if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) {
       this.tweens.add({
         targets: this.playerSprite,
         x: targetScreenX,
-        y: targetScreenY, // Phaser handles tweening both x and y
-        duration: 250, // Jump duration in milliseconds (adjust as needed)
-        ease: "Linear", // You can experiment with eases like 'Power2'
+        y: targetScreenY,
+        duration: 250,
+        ease: "Linear",
         onComplete: () => {
           // --- Jump Completion Logic ---
           console.log(`Jump completed to (${targetGridX}, ${targetGridY})`);
 
-          // Update logical player position
           this.playerGridX = targetGridX;
           this.playerGridY = targetGridY;
 
-          // Change Block State and Appearance
           const blockState =
             this.blockStates[this.playerGridY]?.[this.playerGridX];
           if (blockState) {
-            // Check if state exists (not null)
             blockState.isChanged = true;
-
-            // Update visual sprite
             const blockSprite =
               this.gridSprites[this.playerGridY]?.[this.playerGridX];
             if (blockSprite) {
@@ -266,21 +273,57 @@ if (Phaser.Input.Keyboard.JustDown(this.cursors.left)) {
             }
           }
 
-          // Update Player Depth based on new position
-          // We need to recalculate the base screen Y for depth
           const newPlayerScreenY =
             originY + (this.playerGridX + this.playerGridY) * TILE_HEIGHT_HALF;
-          this.playerSprite?.setDepth(newPlayerScreenY + 1); // Use optional chaining just in case
+          this.playerSprite?.setDepth(newPlayerScreenY + 1);
 
-          // Allow next jump
-          this.playerState = "IDLE";
-          console.log("Player state set to IDLE.");
-
-          // MVP Win Condition Check can go here later
-        }
-      });
+          // --- *** Check for Win Condition *** ---
+          if (this.checkWinCondition()) {
+            // --- Level Complete! ---
+            console.log("*************************");
+            console.log("**** MVP LEVEL CLEAR! ****");
+            console.log("*************************");
+            // Optionally disable further input or transition scene
+            this.playerState = "JUMPING"; // Simple way to disable input for MVP
+            // In a real game, you might transition to a "Level Complete" scene
+            // this.scene.start('LevelCompleteScene');
+          } else {
+            // Only allow next jump if the level is NOT complete
+            this.playerState = "IDLE";
+            console.log("Player state set to IDLE.");
+          }
+        } // End of onComplete
+      }); // End of tween config
     } else {
       console.log(`Invalid jump target: (${targetGridX}, ${targetGridY})`);
+      // Ensure player stays IDLE if jump is invalid
+      this.playerState = "IDLE";
     }
+  }
+
+  // --- NEW: Win Condition Check Method ---
+  private checkWinCondition(): boolean {
+    console.log("Checking win condition...");
+    const gridHeight = levelLayout.length;
+
+    for (let gridY = 0; gridY < gridHeight; gridY++) {
+      const gridWidth = levelLayout[gridY]?.length ?? 0;
+      for (let gridX = 0; gridX < gridWidth; gridX++) {
+        // Check only cells that are supposed to be blocks
+        if (levelLayout[gridY][gridX] === 1) {
+          // If this block exists in state and is NOT changed, we haven't won yet
+          if (!this.blockStates[gridY]?.[gridX]?.isChanged) {
+            console.log(
+              `Win check failed: Block at (${gridX}, ${gridY}) not changed.`
+            );
+            return false; // Found an unchanged block, exit early
+          }
+        }
+      }
+    }
+
+    // If we looped through all blocks and didn't return false, all must be changed
+    console.log("Win condition met!");
+    return true;
   }
 }
