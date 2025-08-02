@@ -1,14 +1,14 @@
 import Phaser from "phaser";
 import { VisualEffects } from "../effects/VisualEffects";
-import { generateParticleTextures, tintSprite } from "../effects/ParticleEffects";
+import { generateParticleTextures } from "../effects/ParticleEffects";
+import { generateBlockTextures } from "../levels/BlockTextures";
+import { LevelManager } from "../levels/LevelManager";
 
 // --- Interfaces ---
 interface BlockState {
   isChanged: boolean;
-  // We could add other properties later, like:
-  // type: 'NORMAL' | 'HOLE' | 'SPECIAL';
-  // initialTextureKey: string;
-  // changedTextureKey: string;
+  type: 'normal' | 'special' | 'goal';
+  points: number;
 }
 
 // --- Constants ---
@@ -17,19 +17,9 @@ const TILE_WIDTH_HALF = 32; // Half the width of the tile image
 const TILE_HEIGHT_HALF = 16; // Half the height of the tile image
 const PLAYER_VERTICAL_OFFSET = -TILE_HEIGHT_HALF * 0.8; // Negative value shifts UP. Adjust multiplier (0.8) as needed.
 
-// Define the grid layout (1 = block, 0 = empty)
-const levelLayout: number[][] = [
-  [1, 1, 1, 0],
-  [1, 1, 1, 1],
-  [1, 1, 0, 1],
-  [0, 1, 1, 1]
-];
-
-// Player's starting position on the grid
-const PLAYER_START_GRID_X = 1;
-const PLAYER_START_GRID_Y = 1;
-
 export class GameScene extends Phaser.Scene {
+    private levelManager: LevelManager;
+    private currentScore: number = 0;
   private playerSprite?: Phaser.GameObjects.Sprite; // Reference to the player sprite
   private gridSprites: (Phaser.GameObjects.Sprite | null)[][] = []; // To store references to block sprites
 
@@ -50,16 +40,7 @@ export class GameScene extends Phaser.Scene {
 
   constructor() {
     super({ key: "GameScene" });
-  }
-
-  // --- Helper Function: Cartesian to Isometric ---
-  private cartesianToIsometric(
-    cartX: number,
-    cartY: number
-  ): { isoX: number; isoY: number } {
-    const isoX = cartX - cartY;
-    const isoY = (cartX + cartY) / 2;
-    return { isoX, isoY };
+    this.levelManager = new LevelManager();
   }
 
   preload(): void {
@@ -67,6 +48,9 @@ export class GameScene extends Phaser.Scene {
 
     // Generate particle textures
     generateParticleTextures(this);
+    
+    // Generate block textures
+    generateBlockTextures(this);
 
     // --- Adjust Block Texture Generation ---
     const blockWidth = TILE_WIDTH_HALF * 2; // 64
@@ -153,10 +137,18 @@ export class GameScene extends Phaser.Scene {
     // Initialize visual effects system
     this.visualEffects = new VisualEffects(this);
 
-    // --- Initialize Player Logical Position ---
-    this.playerGridX = PLAYER_START_GRID_X;
-    this.playerGridY = PLAYER_START_GRID_Y;
+    // Get current level configuration
+    const currentLevel = this.levelManager.getCurrentLevel();
+    if (!currentLevel) {
+        console.error('No level configuration found!');
+        return;
+    }
+
+    // Initialize player position from level config
+    this.playerGridX = currentLevel.startPosition.x;
+    this.playerGridY = currentLevel.startPosition.y;
     this.playerState = "IDLE";
+    this.currentScore = 0;
 
     const originX = this.cameras.main.width / 2;
     const originY = this.cameras.main.height / 2 - 50;
@@ -164,30 +156,39 @@ export class GameScene extends Phaser.Scene {
     this.gridSprites = [];
     this.blockStates = [];
 
-    const gridHeight = levelLayout.length;
+    const gridHeight = currentLevel.layout.length;
 
     for (let gridY = 0; gridY < gridHeight; gridY++) {
-      this.gridSprites[gridY] = [];
-      this.blockStates[gridY] = [];
-      const gridWidth = levelLayout[gridY]?.length ?? 0;
+        this.gridSprites[gridY] = [];
+        this.blockStates[gridY] = [];
+        const gridWidth = currentLevel.layout[gridY]?.length ?? 0;
 
       for (let gridX = 0; gridX < gridWidth; gridX++) {
-        if (levelLayout[gridY][gridX] === 1) {
+        const blockType = currentLevel.layout[gridY][gridX];
+        if (blockType !== 0) {
           const screenX = originX + (gridX - gridY) * TILE_WIDTH_HALF;
-          // --- Calculate BASE screen Y for the block ---
           const blockBaseScreenY = originY + (gridX + gridY) * TILE_HEIGHT_HALF;
 
+          const blockConfig = currentLevel.blockTypes[blockType];
           const blockSprite = this.add.sprite(
             screenX,
             blockBaseScreenY,
-            "block_yellow"
-          ); // Position block at base Y
+            blockConfig.textureKey
+          );
+          
           blockSprite.setOrigin(0.5, 0.5);
-          // --- Set block depth based on its BASE Y ---
           blockSprite.setDepth(blockBaseScreenY);
 
           this.gridSprites[gridY][gridX] = blockSprite;
-          this.blockStates[gridY][gridX] = { isChanged: false };
+          this.blockStates[gridY][gridX] = { 
+            isChanged: false,
+            type: blockConfig.type,
+            points: blockConfig.points || 0
+          };
+          
+          if (blockConfig.type === 'goal') {
+            this.visualEffects.createGlowEffect(blockSprite);
+          }
         } else {
           this.gridSprites[gridY][gridX] = null;
           this.blockStates[gridY][gridX] = null;
@@ -285,13 +286,16 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    const currentLevel = this.levelManager.getCurrentLevel();
+    if (!currentLevel) return;
+
     // --- Validate Target ---
     const isValidTarget =
       targetGridY >= 0 &&
-      targetGridY < levelLayout.length && // Check Y bounds
+      targetGridY < currentLevel.layout.length && // Check Y bounds
       targetGridX >= 0 &&
-      targetGridX < (levelLayout[targetGridY]?.length ?? 0) && // Check X bounds
-      levelLayout[targetGridY]?.[targetGridX] === 1; // Check if it's a block (not 0/empty)
+      targetGridX < (currentLevel.layout[targetGridY]?.length ?? 0) && // Check X bounds
+      currentLevel.layout[targetGridY]?.[targetGridX] !== 0; // Check if it's not empty
 
     if (isValidTarget) {
       // --- Initiate Jump ---
@@ -325,23 +329,33 @@ export class GameScene extends Phaser.Scene {
           this.playerGridX = targetGridX;
           this.playerGridY = targetGridY;
 
-          // Change Block State and Appearance...
-          const blockState =
-            this.blockStates[this.playerGridY]?.[this.playerGridX];
-          if (blockState) {
-            blockState.isChanged = true;
-            const blockSprite =
-              this.gridSprites[this.playerGridY]?.[this.playerGridX];
-            if (blockSprite) {
-              // Play transform effect
-              this.visualEffects.playBlockTransform(blockSprite.x, blockSprite.y);
+                    // Change Block State and Appearance...
+          const blockState = this.blockStates[this.playerGridY]?.[this.playerGridX];
+          const currentLevel = this.levelManager.getCurrentLevel();
+          
+          if (blockState && currentLevel) {
+            const blockSprite = this.gridSprites[this.playerGridY]?.[this.playerGridX];
+            if (blockSprite && !blockState.isChanged) {
+              const blockType = currentLevel.layout[this.playerGridY][this.playerGridX];
+              const blockConfig = currentLevel.blockTypes[blockType];
               
-              // Change block appearance with a glow effect
-              blockSprite.setTexture("block_pink");
-              this.visualEffects.createGlowEffect(blockSprite);
+              // Update block appearance
+              blockSprite.setTexture(blockConfig.transformedTextureKey);
+              
+              // Update state and score
+              blockState.isChanged = true;
+              this.currentScore += blockConfig.points || 0;
+              
+              // Play appropriate effects
+              if (blockConfig.type === 'special') {
+                this.visualEffects.playBlockTransform(blockSprite.x, blockSprite.y);
+                this.visualEffects.createGlowEffect(blockSprite);
+              } else {
+                this.visualEffects.playBlockTransform(blockSprite.x, blockSprite.y);
+              }
               
               console.log(
-                `Block at (${this.playerGridX}, ${this.playerGridY}) changed to pink.`
+                `Block at (${this.playerGridX}, ${this.playerGridY}) transformed. Score: ${this.currentScore}`
               );
             }
           }
@@ -399,29 +413,80 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // --- NEW: Win Condition Check Method ---
   private checkWinCondition(): boolean {
-    console.log("Checking win condition...");
-    const gridHeight = levelLayout.length;
+    const currentLevel = this.levelManager.getCurrentLevel();
+    if (!currentLevel) return false;
 
-    for (let gridY = 0; gridY < gridHeight; gridY++) {
-      const gridWidth = levelLayout[gridY]?.length ?? 0;
-      for (let gridX = 0; gridX < gridWidth; gridX++) {
-        // Check only cells that are supposed to be blocks
-        if (levelLayout[gridY][gridX] === 1) {
-          // If this block exists in state and is NOT changed, we haven't won yet
-          if (!this.blockStates[gridY]?.[gridX]?.isChanged) {
-            console.log(
-              `Win check failed: Block at (${gridX}, ${gridY}) not changed.`
-            );
-            return false; // Found an unchanged block, exit early
-          }
+    console.log("Checking win condition...");
+    const requiredScore = currentLevel.requiredScore || this.calculateRequiredScore();
+
+    // First, check if we've met the score requirement
+    if (this.currentScore < requiredScore) {
+      console.log(`Score requirement not met. Current: ${this.currentScore}, Required: ${requiredScore}`);
+      return false;
+    }
+
+    // Then check if we're on a goal block
+    const currentBlock = this.blockStates[this.playerGridY]?.[this.playerGridX];
+    if (!currentBlock || currentBlock.type !== 'goal') {
+      return false;
+    }
+
+    console.log("Win condition met!");
+    this.handleLevelComplete();
+    return true;
+  }
+
+  private calculateRequiredScore(): number {
+    const currentLevel = this.levelManager.getCurrentLevel();
+    if (!currentLevel) return 0;
+
+    let totalPoints = 0;
+    for (let gridY = 0; gridY < currentLevel.layout.length; gridY++) {
+      for (let gridX = 0; gridX < currentLevel.layout[gridY].length; gridX++) {
+        const blockType = currentLevel.layout[gridY][gridX];
+        if (blockType !== 0) {
+          totalPoints += currentLevel.blockTypes[blockType].points || 0;
         }
       }
     }
+    return Math.floor(totalPoints * 0.7); // 70% of total possible points
+  }
 
-    // If we looped through all blocks and didn't return false, all must be changed
-    console.log("Win condition met!");
-    return true;
+  private handleLevelComplete(): void {
+    // Stop player movement
+    this.playerState = "JUMPING";
+
+    // Show completion message
+    const text = this.add.text(
+      this.cameras.main.centerX,
+      100,
+      `Level Complete!\nScore: ${this.currentScore}`,
+      {
+        align: 'center',
+        fontSize: '32px',
+        fill: '#fff'
+      }
+    ).setOrigin(0.5);
+
+    // Add continue button if there's a next level
+    if (!this.levelManager.isLastLevel()) {
+      const button = this.add.text(
+        this.cameras.main.centerX,
+        150,
+        'Continue to Next Level',
+        {
+          fontSize: '24px',
+          fill: '#fff',
+          backgroundColor: '#000'
+        }
+      )
+      .setOrigin(0.5)
+      .setInteractive()
+      .on('pointerdown', () => {
+        this.levelManager.nextLevel();
+        this.scene.restart();
+      });
+    }
   }
 }
