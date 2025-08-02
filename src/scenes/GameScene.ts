@@ -1,4 +1,6 @@
 import Phaser from "phaser";
+import { VisualEffects } from "../effects/VisualEffects";
+import { generateParticleTextures, tintSprite } from "../effects/ParticleEffects";
 
 // --- Interfaces ---
 interface BlockState {
@@ -43,7 +45,8 @@ export class GameScene extends Phaser.Scene {
   private playerState: "IDLE" | "JUMPING" = "IDLE";
 
   // --- NEW: Idle Bounce Tween Property ---
-  private idleBounceTween?: Phaser.Tweens.Tween; // Optional, as
+  private idleBounceTween?: Phaser.Tweens.Tween;
+  private visualEffects!: VisualEffects;
 
   constructor() {
     super({ key: "GameScene" });
@@ -61,6 +64,9 @@ export class GameScene extends Phaser.Scene {
 
   preload(): void {
     console.log("GameScene: preload");
+
+    // Generate particle textures
+    generateParticleTextures(this);
 
     // --- Adjust Block Texture Generation ---
     const blockWidth = TILE_WIDTH_HALF * 2; // 64
@@ -143,6 +149,9 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     console.log("GameScene: create - Initializing State");
+    
+    // Initialize visual effects system
+    this.visualEffects = new VisualEffects(this);
 
     // --- Initialize Player Logical Position ---
     this.playerGridX = PLAYER_START_GRID_X;
@@ -214,6 +223,9 @@ export class GameScene extends Phaser.Scene {
 
     this.cursors = this.input.keyboard.createCursorKeys();
     console.log("Cursor keys initialized.");
+
+    // Add floating animation to player
+    this.visualEffects.createFloatingAnimation(this.playerSprite);
 
     // --- Start initial idle bounce ---
     this.startIdleBounce();
@@ -296,6 +308,9 @@ export class GameScene extends Phaser.Scene {
         originY + (targetGridX + targetGridY) * TILE_HEIGHT_HALF;
       const targetScreenY = baseTargetScreenY + PLAYER_VERTICAL_OFFSET; // Apply offset
 
+      // Play jump effect at current position
+      this.visualEffects.playJumpEffect(this.playerSprite.x, this.playerSprite.y);
+
       // --- Animate the Jump using Phaser Tweens ---
       this.tweens.add({
         targets: this.playerSprite,
@@ -318,7 +333,13 @@ export class GameScene extends Phaser.Scene {
             const blockSprite =
               this.gridSprites[this.playerGridY]?.[this.playerGridX];
             if (blockSprite) {
+              // Play transform effect
+              this.visualEffects.playBlockTransform(blockSprite.x, blockSprite.y);
+              
+              // Change block appearance with a glow effect
               blockSprite.setTexture("block_pink");
+              this.visualEffects.createGlowEffect(blockSprite);
+              
               console.log(
                 `Block at (${this.playerGridX}, ${this.playerGridY}) changed to pink.`
               );
